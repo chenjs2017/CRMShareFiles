@@ -1,23 +1,15 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
-using System.Net.Http;
-using System.Net.Http.Headers;
-using System.ServiceModel;
-using System.Reflection;
-
 using Microsoft.Xrm.Tooling.Connector;
 using Microsoft.Crm.Sdk.Messages;
-using System.IO;
 
-namespace CRMLib
+namespace CRMUtilityLib
 {
+    /*
+     Microsoft.CrmSdk.CoreAssemblies
+     Microsoft.CrmSdk.XrmTooling.CoreAssembly
+     */
     public  class CRMUtility
     {
         public IOrganizationService CRMOrganizationService { get; set; }
@@ -27,41 +19,12 @@ namespace CRMLib
             Logger(string.Format(formmat, vals));
         }
 
-        public void CreateBulkDeleteJob(string entityName, int executeTimePerday)
-        {
-            var req = new WhoAmIRequest();
-            var res = (WhoAmIResponse) CRMOrganizationService.Execute(req);
-            Guid guid = res.UserId;
-
-            var condition = new ConditionExpression("statecode", ConditionOperator.NotNull);
-            var filter = new FilterExpression();
-            filter.AddCondition(condition);
-            var query = new QueryExpression
-            {
-                EntityName = entityName,
-                Distinct = false ,
-                Criteria = filter
-            };
-            DateTime now = DateTime.Now;
-            DateTime start = new DateTime(now.Year, now.Month, now.Day, now.Hour, 0, 0).AddHours(1);
-            int steps = 24 * 60 / executeTimePerday;
-            for (int i = 0; i < executeTimePerday; i ++)
-            {
-                var request = new BulkDeleteRequest
-                {
-                    JobName = "Bulk Delete " + entityName + start.ToString(" HH-mm-ss"),
-                    QuerySet = new[] { query },
-                    StartDateTime = start,
-                    SendEmailNotification = false,
-                    RecurrencePattern = "FREQ=DAILY;INTERVAL=1;",
-                    ToRecipients = new Guid[] {guid },
-                    CCRecipients = new Guid[] { }
-                };
-                CRMOrganizationService.Execute(request);
-                start = start.AddMinutes(steps);
-            }
-        }
-
+       
+        /// <summary>
+        /// Used in console application
+        /// </summary>
+        /// <param name="connectionString"></param>
+        /// <param name="action"></param>
         public CRMUtility (string connectionString, Action<string > action)
         {
             CrmServiceClient conn = new CrmServiceClient(connectionString);
@@ -71,22 +34,18 @@ namespace CRMLib
             CRMOrganizationService = organizationService;
             Logger = action;
         }
-
-        public void ShowCRMVersion()
-        {
-            RetrieveVersionRequest versionRequest = new RetrieveVersionRequest();
-            RetrieveVersionResponse versionResponse =
-                (RetrieveVersionResponse)CRMOrganizationService.Execute(versionRequest);
-            Logger(String.Format("Microsoft Dynamics CRM version {0}.", versionResponse.Version));
-        }
-
+        /// <summary>
+        /// Used in plug-in, workflow
+        /// </summary>
+        /// <param name="service"></param>
+        /// <param name="logger"></param>
         public CRMUtility(IOrganizationService service, Action<string> logger)
         {
             CRMOrganizationService = service;
             Logger = logger;
         }
-
-        public Entity RetriveEntity(string entityName, string fieldName, string fieldValue, params string[] cols)
+       
+        public Entity RetriveEntity(string entityName, string fieldName, object fieldValue, params string[] cols)
         {
             var t = new Tuple<string, object>(fieldName, fieldValue);
             return RetriveEntity(entityName, new Tuple<string, object>[] { t }, cols);
@@ -177,6 +136,43 @@ namespace CRMLib
             }
             return contact;
         }
+
+        public Entity CreateEntityIfNotExit(string logicalName, params object[] nameValuePair)
+        {
+            Entity entity = RetriveEntity(logicalName, nameValuePair[0] as string, nameValuePair[1], null);
+            if (entity == null)
+            {
+               entity = CreateEntity (logicalName,nameValuePair);
+            }
+            return entity;
+        }
+
+        public void Update(Entity entity)
+        {
+            CRMOrganizationService.Update(entity);
+        }
+
+        public Entity CreateEntity(string logicalName, params object[]nameValuePair)
+        { 
+            Entity entity = new Entity();
+            entity.LogicalName = logicalName;
+            string fieldName = null;
+            foreach (var val in nameValuePair)
+            {
+                if (fieldName == null)
+                {
+                    fieldName = val as string;
+                }
+                else
+                {
+                    entity[fieldName] = val;
+                    fieldName = null;
+                }
+            }
+            entity.Id = CRMOrganizationService.Create(entity);
+            return entity;
+        }
+
         public Entity CreateContact(string firstName, string lastName, string email, Guid accountID)
         {
 
@@ -230,6 +226,49 @@ namespace CRMLib
             Tuple<string, object> addressFilter = new Tuple<string, object>("address1_line1", address);
             Tuple<string, object>[] arr = new Tuple<string, object>[] { nameFileter, addressFilter };
             return RetriveEntity("account", arr, "name");
+        }
+
+        public void ShowCRMVersion()
+        {
+            RetrieveVersionRequest versionRequest = new RetrieveVersionRequest();
+            RetrieveVersionResponse versionResponse =
+                (RetrieveVersionResponse)CRMOrganizationService.Execute(versionRequest);
+            Logger(String.Format("Microsoft Dynamics CRM version {0}.", versionResponse.Version));
+        }
+
+        public void CreateBulkDeleteJob(string entityName, int executeTimePerday)
+        {
+            var req = new WhoAmIRequest();
+            var res = (WhoAmIResponse) CRMOrganizationService.Execute(req);
+            Guid guid = res.UserId;
+
+            var condition = new ConditionExpression("statecode", ConditionOperator.NotNull);
+            var filter = new FilterExpression();
+            filter.AddCondition(condition);
+            var query = new QueryExpression
+            {
+                EntityName = entityName,
+                Distinct = false ,
+                Criteria = filter
+            };
+            DateTime now = DateTime.Now;
+            DateTime start = new DateTime(now.Year, now.Month, now.Day, now.Hour, 0, 0).AddHours(1);
+            int steps = 24 * 60 / executeTimePerday;
+            for (int i = 0; i < executeTimePerday; i ++)
+            {
+                var request = new BulkDeleteRequest
+                {
+                    JobName = "Bulk Delete " + entityName + start.ToString(" HH-mm-ss"),
+                    QuerySet = new[] { query },
+                    StartDateTime = start,
+                    SendEmailNotification = false,
+                    RecurrencePattern = "FREQ=DAILY;INTERVAL=1;",
+                    ToRecipients = new Guid[] {guid },
+                    CCRecipients = new Guid[] { }
+                };
+                CRMOrganizationService.Execute(request);
+                start = start.AddMinutes(steps);
+            }
         }
     }
 }
