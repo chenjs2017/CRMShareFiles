@@ -1,9 +1,12 @@
 ﻿using System;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
+using Microsoft.Xrm.Sdk.Metadata;
 using Microsoft.Xrm.Sdk.Query;
 using Microsoft.Xrm.Tooling.Connector;
 using Microsoft.Crm.Sdk.Messages;
 using System.Collections.Generic;
+using System.Linq;
 namespace CRMUtilityLib
 {
     /*
@@ -14,17 +17,10 @@ namespace CRMUtilityLib
     {
         public IOrganizationService CRMOrganizationService { get; set; }
         protected Action<string> Logger { get; set; }
-        public void Log(string formmat, params object[] vals)
-        {
-            Logger(string.Format(formmat, vals));
-        }
+ 
 
-       
-        /// <summary>
-        /// Used in console application
-        /// </summary>
-        /// <param name="connectionString"></param>
-        /// <param name="action"></param>
+    
+
         public CRMUtility (string connectionString, Action<string > action)
         {
             CrmServiceClient conn = new CrmServiceClient(connectionString);
@@ -38,11 +34,7 @@ namespace CRMUtilityLib
             CRMOrganizationService = organizationService;
             Logger = action;
         }
-        /// <summary>
-        /// Used in plug-in, workflow
-        /// </summary>
-        /// <param name="service"></param>
-        /// <param name="logger"></param>
+
         public CRMUtility(IOrganizationService service, Action<string> logger)
         {
             CRMOrganizationService = service;
@@ -60,7 +52,7 @@ namespace CRMUtilityLib
             return RetriveEntity(entityName, new Tuple<string, object>[] { t }, cols);
         }
 
-        public Entity[] RetriveAllEntity(string entityName, string fieldName, string fieldValue, params string[] cols)
+        public Entity[] RetriveAllEntity(string entityName, string fieldName, object fieldValue, params string[] cols)
         {
             var t = new Tuple<string, object>(fieldName, fieldValue);
             return RetriveAllEntity(entityName, new Tuple<string, object>[] { t }, cols);
@@ -133,8 +125,16 @@ namespace CRMUtilityLib
             DataCollection<Entity> arr = CRMOrganizationService.RetrieveMultiple(query).Entities;
             Log("Result count: {0}", arr.Count);
             return arr.ToArray();
-       }
+        }
 
+        void setStrValue(Entity entity, string fieldName, string val)
+        {
+            if (!string.IsNullOrWhiteSpace(val))
+            {
+                entity[fieldName] = val;
+            }
+        }
+        
         public object ObjVal(Entity entity, string key)
         {
             if (entity.Contains(key) && entity[key] != null)
@@ -161,6 +161,50 @@ namespace CRMUtilityLib
             return entity.Contains(Key) ? (bool) entity[Key] : false;
         }
     
+            public string GetOptionSetValueLabel(string entityName, string fieldName, int optionSetValue)
+        {
+
+            var attReq = new RetrieveAttributeRequest();
+            attReq.EntityLogicalName = entityName;
+            attReq.LogicalName = fieldName;
+            attReq.RetrieveAsIfPublished = true;
+
+            var attResponse = (RetrieveAttributeResponse)CRMOrganizationService.Execute(attReq);
+            var attMetadata = (EnumAttributeMetadata)attResponse.AttributeMetadata;
+
+            return attMetadata.OptionSet.Options.Where(x => x.Value == optionSetValue).FirstOrDefault().Label.UserLocalizedLabel.Label;
+
+        }
+
+        public string GetEntityStringValue(Entity entity, string fld )
+        {
+            if (!entity.Contains(fld))
+            {
+                return "";
+            }
+            object val = entity[fld];
+            if (val is string)
+            {
+                return val as string;
+            }else if (val is EntityReference)
+            {
+                EntityReference reference = val as EntityReference;
+                return reference.Name;
+            }else if (val is DateTime)
+            {
+                return ((DateTime)val).ToString("MM/dd/yyyy");
+            }else if (val is OptionSetValue)
+            {
+                OptionSetValue o = val as OptionSetValue;
+                return GetOptionSetValueLabel(entity.LogicalName, fld, o.Value);
+            }else if (val is decimal)
+            {
+                return val.ToString();
+            }
+
+            return "";
+        }
+       
         public bool ExitOpportunity(string name)
         {
             Entity[] arr = RetriveAllEntity("opportunity", "name", name, "name");
@@ -238,6 +282,14 @@ namespace CRMUtilityLib
             return entity;
         }
 
+       
+        public void GetContactById(Guid id, out string email, out string fullName)
+        {
+            
+            Entity contact = RetrieveByID("contact", id, "emailaddress1","fullname");
+            email = contact["emailaddress1"] as string;
+            fullName = contact["fullname"] as string;
+        }
         public Entity CreateContact(Entity contact, string firstName, string lastName, string email, string phoneNumber, string title, Entity account, bool isPrimary)
         {
             bool create_mode = false;
@@ -300,13 +352,7 @@ namespace CRMUtilityLib
 
             return CreateAccount(account, companyName, City, Address, Zip, State, phone, phone1, extId, email, revenue, custom);
         }
-        public void setStrValue(Entity entity, string fieldName, string val)
-        {
-            if (!string.IsNullOrWhiteSpace(val))
-            {
-                entity[fieldName] = val;
-            }
-        }
+    
 
         public Entity CreateAccount(Entity account, string companyName, string City, string Address, string Zip, string State, 
             string phone, string phone1, string extId, string email, Money revenue, params object[] custom)
@@ -408,6 +454,11 @@ namespace CRMUtilityLib
                 CRMOrganizationService.Execute(request);
                 start = start.AddMinutes(steps);
             }
+        }
+
+        public void Log(string formmat, params object[] vals)
+        {
+            Logger(string.Format(formmat, vals));
         }
     }
 }
